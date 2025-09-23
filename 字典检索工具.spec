@@ -6,11 +6,11 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=['xlwings', 'docx', 'charset_normalizer', 'portalocker', 'win32com', 'docx.oxml.ns', 'docx.enum.text', 'docx.shared', 'docx.oxml', 'docx.enum', 'docx.oxml.shared', 'win32timezone', 'pythoncom', 'pywintypes', 'win32api', 'win32con'],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['matplotlib', 'numpy'],
     noarchive=False,
     optimize=0,
 )

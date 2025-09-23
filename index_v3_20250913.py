@@ -16,6 +16,10 @@ from docx.enum.text import WD_COLOR_INDEX
 from charset_normalizer import detect
 import portalocker
 import random
+import time
+
+# ========= 预计耗时/结束时间：全局开始时间 =========
+start_time = None
 
 
 
@@ -23,6 +27,35 @@ import random
 def log_message(message):
     output_box.insert(tk.END, message + '\n')
     output_box.yview(tk.END)  # 滚动到最后一行
+
+# 计算预计耗时与预计结束时间（根据当前进度百分比）
+def calculate_time_estimation(current_progress):
+    global start_time
+    if start_time is None or current_progress <= 0:
+        return "计算中...", "计算中..."
+
+    elapsed = time.time() - start_time
+    if current_progress >= 100:
+        return "已完成", datetime.datetime.now().strftime("%H:%M:%S")
+
+    # 预计总时长 = 已用时 / 完成比例
+    estimated_total = elapsed / (current_progress / 100.0)
+    remaining = max(0, estimated_total - elapsed)
+
+    # 格式化剩余时间
+    def fmt(sec):
+        sec = int(sec)
+        if sec < 60:
+            return f"{sec}秒"
+        if sec < 3600:
+            m, s = divmod(sec, 60)
+            return f"{m}分{s}秒"
+        h, rem = divmod(sec, 3600)
+        m, _ = divmod(rem, 60)
+        return f"{h}小时{m}分钟"
+
+    end_time = (datetime.datetime.now() + datetime.timedelta(seconds=remaining)).strftime("%H:%M:%S")
+    return fmt(remaining), end_time
 
 # 获取桌面路径
 def get_desktop_path():
@@ -67,7 +100,9 @@ def remove_bracketed_content(text, sheet=None, cell=None):
 
 # 处理Excel文件
 def process_excel(file_path):
+    global start_time
     try:
+        start_time = time.time()
         app = xw.App(visible=False)
         wb = app.books.open(file_path)
         sheet = wb.sheets[0]
@@ -82,6 +117,10 @@ def process_excel(file_path):
             try:
                 root.after(0, lambda: progress_var.set(max(0, min(100, pct))))
                 root.after(0, lambda: progress_label_var.set(f"Excel处理进度：{max(0, min(100, pct)):.1f}%"))
+                # 实时更新时间预估
+                remain, endt = calculate_time_estimation(pct)
+                root.after(0, lambda: estimated_time_var.set(f"预计耗时：{remain}"))
+                root.after(0, lambda: estimated_end_time_var.set(f"预计结束： {endt}"))
             except Exception:
                 pass
 
@@ -190,7 +229,9 @@ def button2_click():
 import random
 
 def process_txt_and_update_doc(txt_file_path, result_json_path, output_file_path):
+    global start_time
     try:
+        start_time = time.time()
         with open(txt_file_path, 'rb') as raw_file:
             raw_data = raw_file.read()
             result = detect(raw_data)
@@ -268,10 +309,11 @@ def process_txt_and_update_doc(txt_file_path, result_json_path, output_file_path
         current_page_count = 0
         page_limit = 200
         
-        # 生成动态文件名格式：字典检索结果_20250913_101209_1
+        # 生成动态文件名：原txt文件名_执行时间
         current_time = datetime.datetime.now()
         timestamp = current_time.strftime("%Y%m%d_%H%M%S")
-        base_output_path = f"字典检索结果_{timestamp}"
+        file_name = os.path.splitext(os.path.basename(txt_file_path))[0]
+        base_output_path = f"{file_name}_{timestamp}"
 
         # 设置默认段落格式
         style = current_document.styles['Normal']
@@ -300,6 +342,10 @@ def process_txt_and_update_doc(txt_file_path, result_json_path, output_file_path
             try:
                 root.after(0, lambda: progress_var.set(max(0, min(100, pct))))
                 root.after(0, lambda: progress_label_var.set(f"TXT生成进度：{max(0, min(100, pct)):.1f}%"))
+                # 实时更新时间预估
+                remain, endt = calculate_time_estimation(pct)
+                root.after(0, lambda: estimated_time_var.set(f"预计耗时：{remain}"))
+                root.after(0, lambda: estimated_end_time_var.set(f"预计结束： {endt}"))
             except Exception:
                 pass
 
@@ -850,6 +896,68 @@ def process_txt_and_update_doc(txt_file_path, result_json_path, output_file_path
                         detail_run.font.name = '宋体'
                         detail_run.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
 
+        # 整体文章汇总：各句子统计信息汇总
+        if all_sentence_stats:
+            overall_header = current_document.add_paragraph()
+            overall_header.paragraph_format.space_after = Pt(6)
+            overall_header.paragraph_format.line_spacing = 1.0
+            overall_header_run = overall_header.add_run("各句子统计信息汇总")
+            overall_header_run.font.size = Pt(12)
+            overall_header_run.font.name = '宋体'
+            overall_header_run.font.bold = True
+            overall_header_run.font.color.rgb = RGBColor(0, 0, 0)
+            overall_header_run.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
+
+            # 计算整篇统计
+            marked_count_overall = 0
+            total_non_title_sentences = total_sentences
+            # 逐句行输出所用的缓存
+            overall_lines = []
+            for stats in all_sentence_stats:
+                if stats.get('is_poem_section') is None:
+                    pass
+                sentence = stats['sentence']
+                mark1_contents = stats['mark1_contents']
+                mark2_contents = stats['mark2_contents']
+                mark3_contents = stats['mark3_contents']
+
+                mark1_filtered = {content: count for content, count in mark1_contents.items() if count > 1}
+                mark2_filtered = {content: count for content, count in mark2_contents.items() if count > 1}
+                mark3_filtered = {content: count for content, count in mark3_contents.items() if count > 1}
+
+                if mark1_filtered or mark2_filtered or mark3_filtered:
+                    marked_count_overall += 1
+                    line_parts = [f"{sentence}"]
+                    if mark1_filtered:
+                        mark1_items = [f"{content}({count})" for content, count in sorted(mark1_filtered.items())]
+                        line_parts.append(f"①{', '.join(mark1_items)}")
+                    if mark2_filtered:
+                        mark2_items = [f"{content}({count})" for content, count in sorted(mark2_filtered.items())]
+                        line_parts.append(f"②{', '.join(mark2_items)}")
+                    if mark3_filtered:
+                        mark3_items = [f"{content}({count})" for content, count in sorted(mark3_filtered.items())]
+                        line_parts.append(f"③{', '.join(mark3_items)}")
+                    overall_lines.append("　　".join(line_parts))
+
+            ratio_overall = (marked_count_overall / total_non_title_sentences * 100) if total_non_title_sentences > 0 else 0.0
+            summary_line = current_document.add_paragraph()
+            summary_line.paragraph_format.space_after = Pt(6)
+            summary_line.paragraph_format.line_spacing = 1.0
+            summary_run = summary_line.add_run(f"有标记句子数：{marked_count_overall} 句（占总句子数的 {ratio_overall:.1f}%）")
+            summary_run.font.size = Pt(11)
+            summary_run.font.name = '宋体'
+            summary_run.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
+
+            # 逐句输出汇总行
+            for text in overall_lines:
+                line = current_document.add_paragraph()
+                line.paragraph_format.space_after = Pt(2)
+                line.paragraph_format.line_spacing = 1.0
+                run = line.add_run(text)
+                run.font.size = Pt(10)
+                run.font.name = '宋体'
+                run.element.rPr.rFonts.set(qn('w:eastAsia'), '宋体')
+
         # 保存最后一个文档
         current_document.save(f"{base_output_path}_{current_page_count // page_limit + 1}.doc")
         log_message(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 新文件已生成并保存")
@@ -883,7 +991,7 @@ def button1_click():
 # 创建GUI窗口
 root = tk.Tk()
 root.title("Excel处理工具")
-root.geometry("1200x400")
+root.geometry("1200x700")
 
 # 添加Text组件用于输出日志
 output_box = tk.Text(root, height=15, width=600)
@@ -897,6 +1005,18 @@ progress_label.pack(pady=2)
 progress_var = tk.DoubleVar(value=0.0)
 progress_bar = ttk.Progressbar(root, orient="horizontal", length=800, mode="determinate", maximum=100.0, variable=progress_var)
 progress_bar.pack(pady=6)
+
+# 预计耗时/预计结束 时间显示
+time_info_frame = tk.Frame(root)
+time_info_frame.pack(pady=6)
+
+estimated_time_var = tk.StringVar(value="预计耗时：计算中...")
+estimated_time_label = tk.Label(time_info_frame, textvariable=estimated_time_var)
+estimated_time_label.pack(side=tk.LEFT, padx=10)
+
+estimated_end_time_var = tk.StringVar(value="预计结束： 计算中...")
+estimated_end_time_label = tk.Label(time_info_frame, textvariable=estimated_end_time_var)
+estimated_end_time_label.pack(side=tk.LEFT, padx=10)
 
 button2 = tk.Button(root, text="处理Excel", command=button2_click)
 button2.pack(pady=10)
